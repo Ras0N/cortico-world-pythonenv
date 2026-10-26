@@ -6,7 +6,7 @@ export const PYTHONENV: WorldDefinition<PythonEnvConfigSection> = {
   id: 'pythonenv',
   label: 'Python Env',
   defaults: () => ({ ...PYTHONENV_DEFAULTS }),
-  create: (ctx) => new PythonEnvWorld({ cfg: ctx.cfg, timezone: ctx.timezone }),
+  create: (ctx) => new PythonEnvWorld({ cfg: ctx.cfg, timezone: ctx.timezone, botDir: ctx.botDir }),
   describe: {
     tools: describeTools(PYTHONENV_TOOL_DECLS, {
       pe_list: { zh: '列出工作目录内相对路径下的文件与文件夹。', en: 'List entries under a relative path in the work directory.' },

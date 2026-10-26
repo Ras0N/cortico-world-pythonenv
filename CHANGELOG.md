@@ -1,3 +1,11 @@
+## 0.1.2
+
+- Move network blacklist out of config into a prompt-doc editor (`NETWORK_BLACKLIST.md`, same WebUI tab as the env prompt). Legacy `worlds.pythonenv.networkBlacklist` migrates once on start. Remove diagnostic `scripts/` probes.
+
+## 0.1.1
+
+- Fix MXC HTTPS: default `hardenUi=false` (no `ui.disable` / Win32k mitigation); keep clipboard and input-injection limits. Optional `hardenUi=true` restores stronger UI isolation at the cost of `_ssl`.
+
 ## 0.1.0
 
 - Initial Windows release: MXC process containment, work-dir file tools, `venv/` Python/pip, restricted shell, rule-based deny, `venv-state/` audit/debug, env prompt guidelines.

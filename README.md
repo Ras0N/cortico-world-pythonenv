@@ -28,8 +28,14 @@ World 配置段仍叫 `worlds.pythonenv`（Cortico id）；与上述文件夹名
 ## 配置（`worlds.pythonenv`）
 
 - `workDir`：工作目录绝对路径（必填才能 `start`）
-- `networkBlacklist`：域名/后缀黑名单，**逗号分隔**字符串（工具扫描 + Python `sitecustomize` 钩子；MXC 网络规则为 CIDR，本版 egress 默认允许）
+- `pythonExecution`：`mxc`（默认）或 `host`（显式降级）
+- `hardenUi`：默认 `false`。为 `true` 时 MXC 使用 `ui.disable`（更强 UI 隔离，但常导致沙箱内 `_ssl`/HTTPS 失败）
 - `commandTimeoutMs` / `maxOutputBytes` / `pythonPath` / `containment`（仅 `process`）/ `auditToEvents`
+
+### 提示词页（与环境提示词同级）
+
+- **环境提示词**：`ENV_PROMPT.md`（注入系统前缀）
+- **网络黑名单**：`NETWORK_BLACKLIST.md`（每行一个域名/后缀，`#` 注释；保存到部署目录 `worlds/pythonenv/`；工具扫描 + `sitecustomize` 钩子；改后下次命令生效）
 
 ## 工具
 
@@ -47,7 +53,7 @@ pnpm test
 ## 常见问题
 
 - **创建 venv 立刻失败，`exitCode: -1073741515`**：Windows `STATUS_DLL_NOT_FOUND`。需只读映射宿主 Python 安装目录；本扩展按「宿主 Python」自动加入 `readonlyPaths`。
-- **`_ssl` / HTTPS 与隔离**：不要指望拷整份 runtime 进 venv。默认 **`pythonExecution=mxc`**（强隔离）；`pip` 在宿主。需要 HTTPS 且保持隔离时，应走 VM/WSLC、宿主 TLS 代理或受控 `pe_http_*` 工具（见方案讨论），**不要**把默认改成 host 跑任意 Python。
+- **`_ssl` / HTTPS**：默认 **`hardenUi=false`**，MXC 内 `import ssl` / HTTPS 可用。若开启 `hardenUi`，Win32k 关停会导致 `_ssl` DLL 初始化失败——需要 HTTPS 时请保持关闭。`pip` 仍在宿主（安装面分离），不要把默认 `pythonExecution` 改成 host。
 - **日志很长被截断**：`debug.log` 行内只留摘要；完整 stdout/stderr 在 `venv-state/last-*-stdout.txt` 与 `last-*-stderr.txt`。
 
 ## 调试日志

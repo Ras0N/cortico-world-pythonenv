@@ -6,7 +6,8 @@ import type { CommandRunner, RunRequest, RunResult } from './types.ts';
  * Windows MXC process containment runner.
  * 依赖 @microsoft/mxc-sdk（MIT，Microsoft）。
  *
- * `_ssl` / `_ctypes` 需要 System32 与 internetClient 等能力；仅映射 Python 树不够。
+ * `_ssl` 需要 System32、internetClient 等，且不能开 `ui.disable`（Win32k mitigation
+ * 会导致 DLL 初始化失败）。默认 `hardenUi=false`。
  */
 export class MxcCommandRunner implements CommandRunner {
   async run(req: RunRequest): Promise<RunResult> {
@@ -48,10 +49,12 @@ export class MxcCommandRunner implements CommandRunner {
       /* optional */
     }
 
+    const hardenUi = req.hardenUi === true;
     dbg('info', 'run', {
       command: req.command,
       cwd: req.cwd,
       timeoutMs: req.timeoutMs,
+      hardenUi,
       readwritePaths,
       readonlyPaths,
     });
@@ -75,7 +78,10 @@ export class MxcCommandRunner implements CommandRunner {
           egress: { default: 'allow' },
           ingress: { default: 'deny', hostLoopback: 'deny' },
         },
-        ui: { disable: true },
+        // hardenUi：关 Win32k，更强 UI 隔离，但常打挂 _ssl。默认关，保留 clipboard/injection 限制。
+        ui: hardenUi
+          ? { disable: true }
+          : { disable: false, clipboard: 'none', allowInputInjection: false },
         environment: req.env,
         inheritDefaultEnvironment: true,
       });

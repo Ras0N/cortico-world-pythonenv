@@ -21,13 +21,35 @@ async function startedWorld() {
   const ctx = fakeWorldContext(PYTHONENV, { scratchDir });
   ctx.persist({ workDir: scratchDir, auditToEvents: true });
   const runner = new FakeRunner();
-  const world = new PythonEnvWorld({ cfg: ctx.cfg, timezone: 'UTC', runner });
+  const world = new PythonEnvWorld({
+    cfg: ctx.cfg,
+    timezone: 'UTC',
+    botDir: ctx.botDir,
+    runner,
+  });
   const host = new FakeHost();
   await world.start(host);
   return { world, host, runner, ctx };
 }
 
 describe('Python Env World', () => {
+  it('默认 hardenUi=false；提示词页含环境提示词与网络黑名单', async () => {
+    expect(PYTHONENV.defaults().hardenUi).toBe(false);
+    expect(PYTHONENV.defaults().networkBlacklist).toBeUndefined();
+    const { world } = await startedWorld();
+    const vars = world.envPromptVars();
+    expect(vars?.['pythonenv.hardenUi']).toBe('false');
+    expect(vars?.['pythonenv.pythonExecution']).toBe('mxc');
+    const docs = world.webUi().promptDocs ?? [];
+    expect(docs.map((d) => d.key)).toEqual([
+      'worlds.pythonenv.envPrompt',
+      'worlds.pythonenv.networkBlacklist',
+    ]);
+    expect(docs[0]?.role).toBe('envPrompt');
+    expect(docs[1]?.role).toBeUndefined();
+    expect(docs[1]?.deploymentPath).toBeTruthy();
+  });
+
   it('干装载不报失败', async () => {
     const report = await dryMountWorld(PYTHONENV, { scratchDir });
     expect(report.failures).toEqual([]);

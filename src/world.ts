@@ -5,7 +5,13 @@ import { fileURLToPath } from 'node:url';
 import type { ToolDef, World, WorldWebUiDecl, WorldHost } from 'cortico/core/types.ts';
 import { nowIso } from 'cortico/core/util.ts';
 import { appendAudit } from './audit.ts';
-import { parseBlacklist, PYTHONENV_CONFIG_GROUP, type PythonEnvConfigSection } from './config.ts';
+import {
+  migrateLegacyNetworkBlacklist,
+  readNetworkBlacklist,
+  resolveNetworkBlacklistPaths,
+  summarizeBlacklist,
+} from './blacklist.ts';
+import { PYTHONENV_CONFIG_GROUP, type PythonEnvConfigSection } from './config.ts';
 import { writeDebug, writeDebugOutputFiles } from './debug-log.ts';
 import { runOnHost } from './host-run.ts';
 import { VENV_DIR, VENV_STATE_DIR } from './layout.ts';
@@ -23,12 +29,15 @@ import type { CommandRunner, RunResult } from './sandbox/types.ts';
 import { mapShellArgvToCommand, parseRestrictedShell } from './shell.ts';
 
 const ENV_PROMPT_FILE = fileURLToPath(new URL('./ENV_PROMPT.md', import.meta.url));
+const NETWORK_BLACKLIST_FILE = fileURLToPath(new URL('./NETWORK_BLACKLIST.md', import.meta.url));
 const SITECUSTOMIZE_SRC = fileURLToPath(new URL('./assets/sitecustomize.py', import.meta.url));
 
 export interface PythonEnvWorldOptions {
   /** `worlds.pythonenv` 的活引用。 */
   cfg: PythonEnvConfigSection;
   timezone: string;
+  /** 部署目录；网络黑名单覆盖写在 `worlds/pythonenv/NETWORK_BLACKLIST.md`。 */
+  botDir: string;
   /** 测试可注入；缺省在 start 时创建 MxcCommandRunner。 */
   runner?: CommandRunner;
 }
@@ -154,12 +163,13 @@ export class PythonEnvWorld implements World {
   envPromptVars(): Record<string, string> | null {
     const work = this.opts.cfg.workDir.trim();
     if (!work) return null;
-    const bl = parseBlacklist(this.opts.cfg.networkBlacklist);
+    const bl = this.networkBlacklist();
     const exec = this.opts.cfg.pythonExecution === 'mxc' ? 'mxc' : 'host';
     return {
       'pythonenv.workDir': work,
-      'pythonenv.blacklistSummary': bl.length ? bl.join(', ') : '(empty)',
+      'pythonenv.blacklistSummary': summarizeBlacklist(bl),
       'pythonenv.pythonExecution': exec,
+      'pythonenv.hardenUi': this.opts.cfg.hardenUi ? 'true' : 'false',
     };
   }
 
@@ -182,10 +192,28 @@ export class PythonEnvWorld implements World {
           role: 'envPrompt',
           vars: [
             { name: 'pythonenv.workDir', description: '当前配置的工作目录。' },
-            { name: 'pythonenv.blacklistSummary', description: '网络黑名单摘要。' },
+            { name: 'pythonenv.blacklistSummary', description: '网络黑名单摘要（完整名单见同页另一文档）。' },
             { name: 'pythonenv.pythonExecution', description: 'host 或 mxc。' },
+            {
+              name: 'pythonenv.hardenUi',
+              description: 'true/false：是否开启 MXC ui.disable（开则 HTTPS 常不可用）。',
+            },
           ],
         },
+        (() => {
+          const { readPath, writePath } = resolveNetworkBlacklistPaths(
+            this.opts.botDir,
+            NETWORK_BLACKLIST_FILE,
+          );
+          return {
+            key: 'worlds.pythonenv.networkBlacklist',
+            title: 'Python Env · 网络黑名单',
+            description:
+              '禁止访问的域名或后缀，每行一条（# 注释）。在此编辑长名单比配置项更方便；保存后下次命令生效。',
+            path: readPath,
+            deploymentPath: writePath,
+          };
+        })(),
       ],
     };
   }
@@ -200,17 +228,24 @@ export class PythonEnvWorld implements World {
     this.workDirAbs = wd.abs;
     this.activeHost = host;
     mkdirSync(join(wd.abs, VENV_STATE_DIR, 'tmp'), { recursive: true });
+    if (migrateLegacyNetworkBlacklist(this.opts.botDir, this.opts.cfg.networkBlacklist)) {
+      writeDebug(wd.abs, 'info', 'migrated legacy networkBlacklist config → NETWORK_BLACKLIST.md');
+    }
     const hostPy = resolveHostPythonExecutable(this.hostPython());
     const readonlyPaths = resolvePythonReadonlyRoots(hostPy);
+    const blacklist = this.networkBlacklist();
     writeDebug(wd.abs, 'info', 'start begin', {
       workDir: wd.abs,
       containment: this.opts.cfg.containment,
+      pythonExecution: this.opts.cfg.pythonExecution,
+      hardenUi: this.opts.cfg.hardenUi === true,
+      blacklistCount: blacklist.length,
       pythonPath: this.hostPython(),
       hostPythonResolved: hostPy,
       readonlyPaths,
       systemReadonlyPaths: resolveSystemReadonlyRoots(),
       platform: process.platform,
-      note: 'venv bootstrap runs on host; user commands run in MXC',
+      note: 'venv bootstrap runs on host; user Python/shell default MXC (hardenUi=false keeps ssl)',
     });
     if (readonlyPaths.length === 0) {
       writeDebug(wd.abs, 'warn', 'no host Python readonly roots; MXC may fail with STATUS_DLL_NOT_FOUND', {
@@ -298,13 +333,17 @@ export class PythonEnvWorld implements World {
     return resolvePythonReadonlyRoots(resolveHostPythonExecutable(this.hostPython()));
   }
 
+  private networkBlacklist(): string[] {
+    return readNetworkBlacklist(this.opts.botDir, NETWORK_BLACKLIST_FILE);
+  }
+
   private sandboxEnv(workDirAbs: string): Record<string, string> {
     // ensurepip / pip 默认写 %TEMP%；沙箱往往读不到宿主 Temp → 指到工作目录内。
     const tmp = this.sandboxTempDir(workDirAbs);
     mkdirSync(tmp, { recursive: true });
     return {
       PYTHONENV_WORKDIR: workDirAbs,
-      PYTHONENV_NET_BLACKLIST: parseBlacklist(this.opts.cfg.networkBlacklist).join(','),
+      PYTHONENV_NET_BLACKLIST: this.networkBlacklist().join(','),
       PYTHONNOUSERSITE: '1',
       PIP_DISABLE_PIP_VERSION_CHECK: '1',
       TEMP: tmp,
@@ -417,6 +456,7 @@ export class PythonEnvWorld implements World {
         readonlyPaths,
         timeoutMs,
         containment: this.opts.cfg.containment,
+        hardenUi: this.opts.cfg.hardenUi === true,
         env: this.sandboxEnv(workDirAbs),
       });
 
@@ -530,7 +570,7 @@ export class PythonEnvWorld implements World {
     const hit = scanForHighRisk({
       tool,
       text,
-      networkBlacklist: parseBlacklist(this.opts.cfg.networkBlacklist),
+      networkBlacklist: this.networkBlacklist(),
     });
     if (!hit) return null;
     return this.deny(tool, hit.message, hit.id, text.slice(0, 500));
@@ -703,9 +743,8 @@ export class PythonEnvWorld implements World {
 
   /**
    * 执行位置策略（见 pythonExecution）：
-   * - pip 始终宿主（PyPI/HTTPS 需要 _ssl；MXC AppContainer 下会「DLL load failed / 内部错误」）。
-   * - python/shell：默认宿主；配置为 mxc 时进 MXC（隔离更强，但 HTTPS 当前不可用）。
-   * 拷贝整份 runtime 进 venv 通常救不了：失败不是「找不到 DLL」，而是 AppContainer 加载加密相关 DLL 被拒。
+   * - pip 始终宿主（安装面与任意代码执行面分离）。
+   * - python/shell：默认 mxc；`hardenUi=false` 时沙箱内 HTTPS 可用；`hardenUi=true` 时常打挂 `_ssl`。
    */
   private shouldRunOnHost(tool: string, command: string): boolean {
     if (tool === 'pe_pip') return true;
@@ -731,9 +770,7 @@ export class PythonEnvWorld implements World {
           command,
           timeoutMs,
           pythonExecution: this.opts.cfg.pythonExecution ?? 'host',
-          reason: onHost
-            ? 'host mode or pip/ssl (MXC AppContainer breaks _ssl/_ctypes)'
-            : undefined,
+          reason: tool === 'pe_pip' || /\bpip(\.exe)?\b/i.test(command) ? 'pip always on host' : 'pythonExecution=host',
         });
         result = await runOnHost({
           command,
@@ -745,10 +782,12 @@ export class PythonEnvWorld implements World {
       } else {
         if (!this.runner) this.runner = new MxcCommandRunner();
         const readonlyPaths = this.hostPythonReadonlyPaths();
+        const hardenUi = this.opts.cfg.hardenUi === true;
         writeDebug(workDirAbs, 'info', 'run in MXC', {
           tool,
           command,
           pythonExecution: this.opts.cfg.pythonExecution,
+          hardenUi,
         });
         result = await this.runner.run({
           command,
@@ -757,6 +796,7 @@ export class PythonEnvWorld implements World {
           readonlyPaths,
           timeoutMs: this.opts.cfg.commandTimeoutMs,
           containment: this.opts.cfg.containment,
+          hardenUi,
           env: this.sandboxEnv(workDirAbs),
         });
       }

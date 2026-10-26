@@ -8,6 +8,11 @@ export interface RunRequest {
   /** 额外只读路径（如宿主 Python 安装前缀），可选。 */
   readonlyPaths?: string[];
   containment: 'process' | 'windows_sandbox';
+  /**
+   * true → MXC `ui.disable`（Win32k 关，SSL 常挂）。
+   * false/缺省 → 不关 Win32k，限制 clipboard / input injection。
+   */
+  hardenUi?: boolean;
 }
 
 export interface RunResult {
