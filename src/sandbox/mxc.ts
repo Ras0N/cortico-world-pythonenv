@@ -20,6 +20,9 @@ export class MxcCommandRunner implements CommandRunner {
     if (req.containment === 'windows_sandbox') {
       throw new Error('containment "windows_sandbox" is not implemented in this version; use "process".');
     }
+    if (req.containment === 'bwrap') {
+      throw new Error('containment "bwrap" is Linux-only; on Windows use "process" (MXC).');
+    }
 
     dbg('info', 'import sdk');
     const mxc = await import('@microsoft/mxc-sdk/v1');

@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describeWindowsExitCode, resolvePythonReadonlyRoots } from '../src/python-home.ts';
+import {
+  describeWindowsExitCode,
+  resolvePythonReadonlyRoots,
+  venvPipPath,
+  venvPythonPath,
+} from '../src/python-home.ts';
 
 let root: string;
 beforeEach(() => {
@@ -23,5 +28,11 @@ describe('python-home', () => {
 
   it('decodes STATUS_DLL_NOT_FOUND', () => {
     expect(describeWindowsExitCode(-1073741515)).toMatch(/STATUS_DLL_NOT_FOUND/);
+  });
+
+  it('resolves venv python/pip paths per platform', () => {
+    const v = join(root, 'venv');
+    expect(venvPythonPath(v, 'win32')).toMatch(/Scripts[\\/]python\.exe$/i);
+    expect(venvPipPath(v, 'linux')).toMatch(/bin[/\\]pip$/i);
   });
 });

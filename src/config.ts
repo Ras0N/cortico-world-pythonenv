@@ -1,4 +1,8 @@
 import type { ConfigGroup } from 'cortico/core/types.ts';
+import type { ContainmentKind } from './sandbox/types.ts';
+
+/** 进平台沙箱：Windows 用 mxc，Linux 用 bwrap；host = 显式降级。 */
+export type PythonExecution = 'mxc' | 'bwrap' | 'host';
 
 /** config.json 的 worlds.pythonenv 段；默认禁用。 */
 export interface PythonEnvConfigSection {
@@ -17,21 +21,34 @@ export interface PythonEnvConfigSection {
   /** 宿主 Python 可执行文件；空则用 PATH 上的 python。重启生效。 */
   pythonPath: string;
   /**
-   * Python/shell 执行位置（不含 pip）。
-   * - mxc（默认）：进 MXC，强隔离；默认 `hardenUi=false` 时可 `import ssl` / HTTPS。
-   * - host：仅作显式降级，失去 MXC 兜底，不推荐日常使用。
-   * pip 固定在宿主执行（安装面与任意代码执行面分离）。
+   * 执行位置：
+   * - `mxc` / `bwrap`：进平台沙箱（Win=MXC，Linux=bubblewrap；二者均表示沙箱模式）。
+   * - `host`：显式降级，失去沙箱兜底，不推荐。
+   * Windows：pip 仍在宿主；Linux：pip 也进 bwrap（与 Python/shell 一致）。
    */
-  pythonExecution: 'host' | 'mxc';
+  pythonExecution: PythonExecution;
   /**
-   * MXC UI 硬化：`true` 时 `ui.disable`（关 Win32k），隔离更强，但常导致 `_ssl` DLL 初始化失败。
-   * 默认 `false`：保留 clipboard/injection 限制，HTTPS 可用。热改（下次 run 生效）。
+   * Windows-only：MXC `ui.disable`。Linux 忽略。
+   * 默认 `false`。热改（下次 run 生效）。
    */
   hardenUi: boolean;
-  /** 隔离后端：`process`（processcontainer）。其它后端见后续方案。重启生效。 */
-  containment: 'process' | 'windows_sandbox';
+  /** 隔离后端。Windows：`process`；Linux：`bwrap`。重启生效。 */
+  containment: ContainmentKind;
   /** 是否把拒绝等推到事件流。热改。 */
   auditToEvents: boolean;
+}
+
+export function defaultPythonExecution(platform: NodeJS.Platform = process.platform): PythonExecution {
+  return platform === 'linux' ? 'bwrap' : 'mxc';
+}
+
+export function defaultContainment(platform: NodeJS.Platform = process.platform): ContainmentKind {
+  return platform === 'linux' ? 'bwrap' : 'process';
+}
+
+/** 是否为「进沙箱」配置（相对 host）。 */
+export function isSandboxExecution(exec: PythonExecution | undefined): boolean {
+  return exec === 'mxc' || exec === 'bwrap';
 }
 
 export const PYTHONENV_DEFAULTS: PythonEnvConfigSection = {
@@ -40,9 +57,9 @@ export const PYTHONENV_DEFAULTS: PythonEnvConfigSection = {
   commandTimeoutMs: 60_000,
   maxOutputBytes: 65_536,
   pythonPath: '',
-  pythonExecution: 'mxc',
+  pythonExecution: defaultPythonExecution(),
   hardenUi: false,
-  containment: 'process',
+  containment: defaultContainment(),
   auditToEvents: true,
 };
 
@@ -75,30 +92,30 @@ export const PYTHONENV_CONFIG_GROUP: ConfigGroup = {
       'worlds.pythonenv.pythonPath': {
         type: 'string',
         title: '宿主 Python',
-        description: '用于创建工作目录 venv 的 Python；留空则用 PATH 中的 python。改后需重启本 World。',
+        description: '用于创建工作目录 venv 的 Python；留空则用 PATH 中的 python / python3。改后需重启本 World。',
         'x-hot': false,
-        'x-path': { kind: 'file', extensions: ['.exe'] },
+        'x-path': { kind: 'file' },
       },
       'worlds.pythonenv.pythonExecution': {
         type: 'string',
-        title: 'Python 执行位置',
+        title: '执行位置',
         description:
-          'mxc=默认强隔离（hardenUi 默认关时 HTTPS 可用）；host=显式降级到宿主（失去 MXC 兜底，不推荐）。pip 始终在宿主。',
-        enum: ['host', 'mxc'],
+          'mxc / bwrap = 进平台沙箱（Windows→MXC，Linux→bubblewrap）；host = 显式降级（不推荐）。Windows 上 pip 仍在宿主；Linux 上 pip 也进 bwrap。',
+        enum: ['mxc', 'bwrap', 'host'],
         'x-hot': true,
       },
       'worlds.pythonenv.hardenUi': {
         type: 'boolean',
-        title: '硬化 UI（关 Win32k）',
+        title: '硬化 UI（仅 Windows）',
         description:
-          '开启后 MXC 使用 ui.disable，UI 隔离更强，但常导致沙箱内 _ssl/HTTPS 失败。默认关闭以保留 HTTPS。',
+          '仅 MXC：开启后 ui.disable，UI 隔离更强，但常导致 _ssl/HTTPS 失败。Linux 忽略。默认关闭。',
         'x-hot': true,
       },
       'worlds.pythonenv.containment': {
         type: 'string',
-        title: 'MXC 隔离后端',
-        description: 'pythonExecution=mxc 时使用。当前仅 process（processcontainer）。',
-        enum: ['process', 'windows_sandbox'],
+        title: '隔离后端',
+        description: 'Windows 用 process（MXC processcontainer）；Linux 用 bwrap。windows_sandbox 未实现。',
+        enum: ['process', 'bwrap', 'windows_sandbox'],
         'x-hot': false,
       },
       'worlds.pythonenv.auditToEvents': {

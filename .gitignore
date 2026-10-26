@@ -60,6 +60,9 @@ Desktop.ini
 .agent/
 agent-tools/
 
+# Local working checklist (not shipped)
+TODO.md
+
 # Optional: local scratch / playground copies mistakenly placed in-repo
 coopanion_playground/
 *_playground/

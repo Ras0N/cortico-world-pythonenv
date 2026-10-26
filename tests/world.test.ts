@@ -36,10 +36,11 @@ describe('Python Env World', () => {
   it('默认 hardenUi=false；提示词页含环境提示词与网络黑名单', async () => {
     expect(PYTHONENV.defaults().hardenUi).toBe(false);
     expect(PYTHONENV.defaults().networkBlacklist).toBeUndefined();
+    expect(['mxc', 'bwrap']).toContain(PYTHONENV.defaults().pythonExecution);
     const { world } = await startedWorld();
     const vars = world.envPromptVars();
     expect(vars?.['pythonenv.hardenUi']).toBe('false');
-    expect(vars?.['pythonenv.pythonExecution']).toBe('mxc');
+    expect(['mxc', 'bwrap', 'host']).toContain(vars?.['pythonenv.pythonExecution']);
     const docs = world.webUi().promptDocs ?? [];
     expect(docs.map((d) => d.key)).toEqual([
       'worlds.pythonenv.envPrompt',

@@ -1,13 +1,13 @@
 # cortico-world-pythonenv
 
-Cortico / Coopanion **World** 扩展：在用户自选的工作目录内提供受限文件操作、`venv` Python / pip、白名单 shell；Windows 下用 **MXC**（`@microsoft/mxc-sdk`，MIT）做进程隔离；规则特征命中则**默认拒绝**；审计写入工作目录 `venv-state/audit.jsonl`。不读取、不上传你的 API Key 或隐私数据。
+Cortico / Coopanion **World** 扩展：在用户自选的工作目录内提供受限文件操作、`venv` Python / pip、白名单 shell；规则特征命中则**默认拒绝**；审计写入工作目录 `venv-state/audit.jsonl`。不读取、不上传你的 API Key 或隐私数据。
 
 | | |
 |---|---|
 | 包名 | `cortico-world-pythonenv` |
 | World id | `pythonenv` |
 | 工具前缀 | `pe_` |
-| 平台（本版） | Windows（`os: win32`） |
+| 平台 | **Windows**（已实现，MXC）；**Linux**（Debian 系，Bubblewrap：骨架已就绪，runner 开发中） |
 | 契约 | `cortico.api` = 6 |
 
 ## 工作目录布局
@@ -19,18 +19,48 @@ Cortico / Coopanion **World** 扩展：在用户自选的工作目录内提供�
 
 World 配置段仍叫 `worlds.pythonenv`（Cortico id）；与上述文件夹名无关。
 
-## 前提
+## 系统要求
 
-- Windows，且主机满足 [MXC](https://github.com/microsoft/mxc) process containment 要求。
-- 已安装可用的 Python 3（用于创建工作目录下的 `venv`）。
-- 运行 Coopanion / Cortico 的 Node 建议 **≥ 24**（MXC SDK 要求）；本包 `engines` 写 ≥22 以兼容 Cortico 扩展约定。
+### 通用
+
+- 已安装可用的 **Python 3**（用于创建工作目录下的 `venv`）。
+- 运行 Coopanion / Cortico 的 Node：**≥ 22**（本包 `engines`）；Windows 上使用 MXC 时建议 **≥ 24**（MXC SDK 要求）。
+
+### Windows（已实现）
+
+- 主机满足 [MXC](https://github.com/microsoft/mxc) **process containment** 要求。
+- 隔离后端：`@microsoft/mxc-sdk`（MIT）。
+- 默认 `pythonExecution=mxc`：Python / shell 进 MXC；**pip 仍在宿主**（安装面与执行面分离）。
+- `hardenUi`：默认 `false`（保留 HTTPS）；`true` 时更强 UI 隔离但常导致 `_ssl` 失败。
+
+### Linux（计划中 / Debian 系）
+
+当前目标发行版（其它暂不考虑）：
+
+| 发行版 | 最低版本 |
+|---|---|
+| Ubuntu | **22.04 LTS** |
+| Debian | **13** |
+
+其它要求：
+
+- **内核 > 5.0**，具备 **user namespace**（上述发行版默认满足；不做旧内核 / 无 userns 降级）。
+- 系统已安装 **[bubblewrap](https://github.com/containers/bubblewrap)**（`bwrap`）。缺失时 **硬失败**，并提示安装，例如：
+
+  ```bash
+  sudo apt update
+  sudo apt install bubblewrap
+  ```
+
+- 隔离目标与 Windows MXC **对齐**：workDir 可写、宿主 Python 树只读、出站默许 + 网络黑名单软拦。
+- `pythonExecution` 取值：`mxc` / `bwrap` / `host`。`mxc` 与 `bwrap` 均表示进平台沙箱（Windows 跑 MXC，Linux 跑 bubblewrap）；默认 Windows=`mxc`、Linux=`bwrap`。Linux 上 **Python / pip / shell 均在 bwrap 内**。
 
 ## 配置（`worlds.pythonenv`）
 
 - `workDir`：工作目录绝对路径（必填才能 `start`）
-- `pythonExecution`：`mxc`（默认）或 `host`（显式降级）
-- `hardenUi`：默认 `false`。为 `true` 时 MXC 使用 `ui.disable`（更强 UI 隔离，但常导致沙箱内 `_ssl`/HTTPS 失败）
-- `commandTimeoutMs` / `maxOutputBytes` / `pythonPath` / `containment`（仅 `process`）/ `auditToEvents`
+- `pythonExecution`：`mxc` | `bwrap` | `host`（后两者见上；`host` 失去沙箱兜底，不推荐）
+- `hardenUi`：仅 Windows 有意义；默认 `false`；Linux 忽略
+- `commandTimeoutMs` / `maxOutputBytes` / `pythonPath` / `containment`（Windows：`process`；Linux：`bwrap`）/ `auditToEvents`
 
 ### 提示词页（与环境提示词同级）
 
@@ -52,8 +82,9 @@ pnpm test
 
 ## 常见问题
 
-- **创建 venv 立刻失败，`exitCode: -1073741515`**：Windows `STATUS_DLL_NOT_FOUND`。需只读映射宿主 Python 安装目录；本扩展按「宿主 Python」自动加入 `readonlyPaths`。
-- **`_ssl` / HTTPS**：默认 **`hardenUi=false`**，MXC 内 `import ssl` / HTTPS 可用。若开启 `hardenUi`，Win32k 关停会导致 `_ssl` DLL 初始化失败——需要 HTTPS 时请保持关闭。`pip` 仍在宿主（安装面分离），不要把默认 `pythonExecution` 改成 host。
+- **创建 venv 立刻失败，`exitCode: -1073741515`（Windows）**：`STATUS_DLL_NOT_FOUND`。需只读映射宿主 Python 安装目录；本扩展按「宿主 Python」自动加入 `readonlyPaths`。
+- **`_ssl` / HTTPS（Windows）**：默认 **`hardenUi=false`**，MXC 内可用。开启 `hardenUi` 常导致 `_ssl` 失败。Windows 上 `pip` 仍在宿主。
+- **Linux 提示缺少 bwrap**：按上文安装 `bubblewrap`；本扩展不会在缺省时静默改用宿主执行。
 - **日志很长被截断**：`debug.log` 行内只留摘要；完整 stdout/stderr 在 `venv-state/last-*-stdout.txt` 与 `last-*-stderr.txt`。
 
 ## 调试日志

@@ -11,7 +11,7 @@ import {
   resolveNetworkBlacklistPaths,
   summarizeBlacklist,
 } from './blacklist.ts';
-import { PYTHONENV_CONFIG_GROUP, type PythonEnvConfigSection } from './config.ts';
+import { isSandboxExecution, PYTHONENV_CONFIG_GROUP, type PythonEnvConfigSection } from './config.ts';
 import { writeDebug, writeDebugOutputFiles } from './debug-log.ts';
 import { runOnHost } from './host-run.ts';
 import { VENV_DIR, VENV_STATE_DIR } from './layout.ts';
@@ -22,9 +22,12 @@ import {
   resolveHostPythonExecutable,
   resolvePythonReadonlyRoots,
   resolveSystemReadonlyRoots,
+  venvPipPath,
+  venvPythonPath,
+  venvSitePackagesDir,
 } from './python-home.ts';
 import { redactSecrets, scanForHighRisk } from './rules.ts';
-import { MxcCommandRunner } from './sandbox/mxc.ts';
+import { createSandboxRunner, isPlatformSandboxRunner } from './sandbox/index.ts';
 import type { CommandRunner, RunResult } from './sandbox/types.ts';
 import { mapShellArgvToCommand, parseRestrictedShell } from './shell.ts';
 
@@ -38,7 +41,7 @@ export interface PythonEnvWorldOptions {
   timezone: string;
   /** 部署目录；网络黑名单覆盖写在 `worlds/pythonenv/NETWORK_BLACKLIST.md`。 */
   botDir: string;
-  /** 测试可注入；缺省在 start 时创建 MxcCommandRunner。 */
+  /** 测试可注入；缺省在 start 时按平台 createSandboxRunner()。 */
   runner?: CommandRunner;
 }
 
@@ -164,7 +167,7 @@ export class PythonEnvWorld implements World {
     const work = this.opts.cfg.workDir.trim();
     if (!work) return null;
     const bl = this.networkBlacklist();
-    const exec = this.opts.cfg.pythonExecution === 'mxc' ? 'mxc' : 'host';
+    const exec = this.opts.cfg.pythonExecution;
     return {
       'pythonenv.workDir': work,
       'pythonenv.blacklistSummary': summarizeBlacklist(bl),
@@ -193,10 +196,10 @@ export class PythonEnvWorld implements World {
           vars: [
             { name: 'pythonenv.workDir', description: '当前配置的工作目录。' },
             { name: 'pythonenv.blacklistSummary', description: '网络黑名单摘要（完整名单见同页另一文档）。' },
-            { name: 'pythonenv.pythonExecution', description: 'host 或 mxc。' },
+            { name: 'pythonenv.pythonExecution', description: 'mxc / bwrap / host。' },
             {
               name: 'pythonenv.hardenUi',
-              description: 'true/false：是否开启 MXC ui.disable（开则 HTTPS 常不可用）。',
+              description: '仅 Windows：true 时 MXC ui.disable（HTTPS 常不可用）。',
             },
           ],
         },
@@ -256,7 +259,7 @@ export class PythonEnvWorld implements World {
     try {
       // 测试注入的 FakeRunner 走沙箱模拟；生产环境在宿主建 venv（避开 AppContainer 下 _ssl/_ctypes 失败）
       await this.ensureVenv(host);
-      if (!this.runner) this.runner = new MxcCommandRunner();
+      if (!this.runner) this.runner = createSandboxRunner();
       this.injectSitecustomize(wd.abs);
       writeDebug(wd.abs, 'info', 'sitecustomize injected');
     } catch (e) {
@@ -313,11 +316,11 @@ export class PythonEnvWorld implements World {
   }
 
   private venvPython(workDirAbs: string): string {
-    return join(this.venvRoot(workDirAbs), 'Scripts', 'python.exe');
+    return venvPythonPath(this.venvRoot(workDirAbs));
   }
 
   private venvPip(workDirAbs: string): string {
-    return join(this.venvRoot(workDirAbs), 'Scripts', 'pip.exe');
+    return venvPipPath(this.venvRoot(workDirAbs));
   }
 
   private sandboxTempDir(workDirAbs: string): string {
@@ -325,7 +328,9 @@ export class PythonEnvWorld implements World {
   }
 
   private hostPython(): string {
-    return this.opts.cfg.pythonPath.trim() || 'python';
+    const configured = this.opts.cfg.pythonPath.trim();
+    if (configured) return configured;
+    return process.platform === 'win32' ? 'python' : 'python3';
   }
 
   /** 宿主 Python 安装树 → MXC readonlyPaths（否则沙箱内 python.exe 会 DLL_NOT_FOUND）。 */
@@ -353,9 +358,9 @@ export class PythonEnvWorld implements World {
   }
 
   private injectSitecustomize(workDirAbs: string): void {
-    const site = join(this.venvRoot(workDirAbs), 'Lib', 'site-packages');
-    if (!existsSync(site)) {
-      throw new Error(`venv site-packages missing: ${site}`);
+    const site = venvSitePackagesDir(this.venvRoot(workDirAbs));
+    if (!site || !existsSync(site)) {
+      throw new Error(`venv site-packages missing under ${this.venvRoot(workDirAbs)}`);
     }
     copyFileSync(SITECUSTOMIZE_SRC, join(site, 'sitecustomize.py'));
   }
@@ -373,8 +378,8 @@ export class PythonEnvWorld implements World {
   }
 
   private async ensureVenv(host: WorldHost): Promise<void> {
-    // 单元测试注入的 runner（非 MXC）仍走模拟路径
-    if (this.runner && !(this.runner instanceof MxcCommandRunner)) {
+    // 单元测试注入的 FakeRunner 走模拟路径；平台沙箱 runner 仍在宿主建 venv
+    if (this.runner && !isPlatformSandboxRunner(this.runner)) {
       await this.ensureVenvWithRunner(host, this.runner);
       return;
     }
@@ -743,19 +748,26 @@ export class PythonEnvWorld implements World {
 
   /**
    * 执行位置策略（见 pythonExecution）：
-   * - pip 始终宿主（安装面与任意代码执行面分离）。
-   * - python/shell：默认 mxc；`hardenUi=false` 时沙箱内 HTTPS 可用；`hardenUi=true` 时常打挂 `_ssl`。
+   * - Windows + 沙箱模式：pip 仍在宿主；python/shell 进 MXC。
+   * - Linux + 沙箱模式（mxc/bwrap）：pip / python / shell 均进 bwrap。
+   * - host：python/shell/pip（若走到此处）均宿主。
    */
   private shouldRunOnHost(tool: string, command: string): boolean {
+    const sandbox = isSandboxExecution(this.opts.cfg.pythonExecution);
+    if (!sandbox) {
+      return tool === 'pe_run_python' || tool === 'pe_shell' || tool === 'pe_pip';
+    }
+    // 沙箱模式
+    if (process.platform === 'linux') return false;
+    // Windows：pip 留宿主
     if (tool === 'pe_pip') return true;
     if (tool === 'pe_shell' && /(^|[\s"'])pip(\.exe)?\b/i.test(command)) return true;
-    if (this.opts.cfg.pythonExecution === 'mxc') return false;
-    return tool === 'pe_run_python' || tool === 'pe_shell';
+    return false;
   }
 
   private async runCommand(tool: string, command: string, workDirAbs: string): Promise<string> {
     this.injectSitecustomize(workDirAbs);
-    const injectedTestRunner = this.runner && !(this.runner instanceof MxcCommandRunner);
+    const injectedTestRunner = this.runner && !isPlatformSandboxRunner(this.runner);
     const onHost = !injectedTestRunner && this.shouldRunOnHost(tool, command);
 
     let result: RunResult;
@@ -769,8 +781,11 @@ export class PythonEnvWorld implements World {
           tool,
           command,
           timeoutMs,
-          pythonExecution: this.opts.cfg.pythonExecution ?? 'host',
-          reason: tool === 'pe_pip' || /\bpip(\.exe)?\b/i.test(command) ? 'pip always on host' : 'pythonExecution=host',
+          pythonExecution: this.opts.cfg.pythonExecution,
+          reason:
+            process.platform === 'win32' && (tool === 'pe_pip' || /\bpip(\.exe)?\b/i.test(command))
+              ? 'Windows: pip stays on host'
+              : 'pythonExecution=host',
         });
         result = await runOnHost({
           command,
@@ -780,21 +795,27 @@ export class PythonEnvWorld implements World {
         });
         writeDebugOutputFiles(workDirAbs, `host-${tool}`, result);
       } else {
-        if (!this.runner) this.runner = new MxcCommandRunner();
+        if (!this.runner) this.runner = createSandboxRunner();
         const readonlyPaths = this.hostPythonReadonlyPaths();
-        const hardenUi = this.opts.cfg.hardenUi === true;
-        writeDebug(workDirAbs, 'info', 'run in MXC', {
+        const hardenUi = process.platform === 'win32' && this.opts.cfg.hardenUi === true;
+        const pipTimeout =
+          tool === 'pe_pip' || /\bpip(\.exe)?\b/i.test(command)
+            ? Math.max(this.opts.cfg.commandTimeoutMs, 600_000)
+            : this.opts.cfg.commandTimeoutMs;
+        writeDebug(workDirAbs, 'info', 'run in sandbox', {
           tool,
           command,
           pythonExecution: this.opts.cfg.pythonExecution,
+          containment: this.opts.cfg.containment,
           hardenUi,
+          platform: process.platform,
         });
         result = await this.runner.run({
           command,
           cwd: workDirAbs,
           workDirAbs,
           readonlyPaths,
-          timeoutMs: this.opts.cfg.commandTimeoutMs,
+          timeoutMs: pipTimeout,
           containment: this.opts.cfg.containment,
           hardenUi,
           env: this.sandboxEnv(workDirAbs),
@@ -804,7 +825,7 @@ export class PythonEnvWorld implements World {
       return this.errorOutcome(tool, e instanceof Error ? e.message : String(e));
     }
     this.allowAudit(tool, command);
-    const meaning = describeWindowsExitCode(result.exitCode);
+    const meaning = process.platform === 'win32' ? describeWindowsExitCode(result.exitCode) : undefined;
     const out = clip(
       `exit=${result.exitCode}${meaning ? ` (${meaning})` : ''} timedOut=${result.timedOut}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`,
       this.opts.cfg.maxOutputBytes,

@@ -4,52 +4,82 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 
 /**
  * 在宿主上解析 Python 可执行文件的绝对路径（不进沙箱）。
- * 配置为空或相对名时用 `where.exe`。
+ * Windows：`where.exe`；Linux：`command -v`（经 `sh -c`）。
  */
-export function resolveHostPythonExecutable(configured: string): string {
+export function resolveHostPythonExecutable(
+  configured: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
   const trimmed = configured.trim();
   if (trimmed && (isAbsolute(trimmed) || existsSync(trimmed))) {
     return resolve(trimmed);
   }
-  const name = trimmed || 'python';
+  const candidates =
+    platform === 'win32'
+      ? [trimmed || 'python', 'python', 'py']
+      : [trimmed || 'python3', 'python3', 'python'];
+
+  for (const name of candidates) {
+    if (!name) continue;
+    const found = lookupOnPath(name, platform);
+    if (found) return found;
+  }
+  return trimmed || (platform === 'win32' ? 'python' : 'python3');
+}
+
+function lookupOnPath(name: string, platform: NodeJS.Platform): string | undefined {
   try {
-    const out = execFileSync('where.exe', [name], { encoding: 'utf8', windowsHide: true });
-    const first = out
-      .split(/\r?\n/)
-      .map((s) => s.trim())
-      .find((s) => s && existsSync(s));
-    if (first) return resolve(first);
+    if (platform === 'win32') {
+      const out = execFileSync('where.exe', [name], { encoding: 'utf8', windowsHide: true });
+      const first = out
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .find((s) => s && existsSync(s));
+      return first ? resolve(first) : undefined;
+    }
+    const out = execFileSync('/bin/sh', ['-c', `command -v -- ${shellQuote(name)}`], {
+      encoding: 'utf8',
+    });
+    const first = out.trim().split(/\r?\n/)[0]?.trim();
+    if (first && existsSync(first)) return resolve(first);
   } catch {
     /* fall through */
   }
-  return name;
+  return undefined;
+}
+
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 export function pythonPrefixOf(pythonExecutable: string): string | undefined {
   if (!pythonExecutable || !existsSync(pythonExecutable)) return undefined;
   let dir = dirname(resolve(pythonExecutable));
-  if (basename(dir).toLowerCase() === 'scripts') dir = dirname(dir);
+  const leaf = basename(dir).toLowerCase();
+  // Windows: .../Python315/Scripts/python.exe → prefix Python315
+  // Linux venv: .../venv/bin/python → prefix venv
+  if (leaf === 'scripts' || leaf === 'bin') dir = dirname(dir);
   return dir;
 }
 
 /**
- * MXC 需要把宿主 Python 安装树标为只读，否则进程会以 STATUS_DLL_NOT_FOUND
- * （exit -1073741515 / 0xC0000135）秒退：沙箱默认看不到 C:\Python3xx。
+ * 沙箱只读映射宿主 Python 安装树（Windows MXC 必需；Linux bwrap 同样需要能读到解释器与标准库）。
  */
 export function resolvePythonReadonlyRoots(pythonExecutable: string): string[] {
   const roots = new Set<string>();
   const prefix = pythonPrefixOf(pythonExecutable);
   if (!prefix) return [];
   roots.add(prefix);
-  for (const sub of ['DLLs', 'Lib', 'libs', 'include']) {
+  for (const sub of ['DLLs', 'Lib', 'lib', 'libs', 'include', 'bin', 'Scripts']) {
     const p = join(prefix, sub);
     if (existsSync(p)) roots.add(p);
   }
   return [...roots];
 }
 
-/** `_ssl` / `_ctypes` 还依赖 System32 里的系统 DLL；尽量只读映射进去。 */
-export function resolveSystemReadonlyRoots(): string[] {
+/** Windows：`_ssl` / `_ctypes` 依赖 System32。Linux 返回空。 */
+export function resolveSystemReadonlyRoots(platform: NodeJS.Platform = process.platform): string[] {
+  if (platform !== 'win32') return [];
   const sys = process.env.SystemRoot || 'C:\\Windows';
   const out: string[] = [];
   for (const leaf of ['System32', 'SysWOW64']) {
@@ -60,8 +90,7 @@ export function resolveSystemReadonlyRoots(): string[] {
 }
 
 /**
- * 把宿主 Python 的 DLLs/*.dll|*.pyd 镜像进 venv，便于沙箱侧按工作目录加载
- * （不能替代 System32，但对 libssl/libffi 等同目录依赖有帮助）。
+ * 把宿主 Python 的 DLLs/*.dll|*.pyd 镜像进 venv（仅 Windows 有意义）。
  */
 export function mirrorPythonDllsIntoVenv(pythonExecutable: string, venvRoot: string): number {
   const prefix = pythonPrefixOf(pythonExecutable);
@@ -80,6 +109,37 @@ export function mirrorPythonDllsIntoVenv(pythonExecutable: string, venvRoot: str
     }
   }
   return n;
+}
+
+/** venv 内解释器路径（Windows Scripts/python.exe，Linux bin/python）。 */
+export function venvPythonPath(venvRoot: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === 'win32'
+    ? join(venvRoot, 'Scripts', 'python.exe')
+    : join(venvRoot, 'bin', 'python');
+}
+
+export function venvPipPath(venvRoot: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === 'win32'
+    ? join(venvRoot, 'Scripts', 'pip.exe')
+    : join(venvRoot, 'bin', 'pip');
+}
+
+/** site-packages：Windows `Lib/site-packages`；Linux `lib/python3.x/site-packages`。 */
+export function venvSitePackagesDir(venvRoot: string, platform: NodeJS.Platform = process.platform): string | undefined {
+  if (platform === 'win32') {
+    const p = join(venvRoot, 'Lib', 'site-packages');
+    return existsSync(p) ? p : p;
+  }
+  const lib = join(venvRoot, 'lib');
+  if (!existsSync(lib)) return undefined;
+  for (const name of readdirSync(lib)) {
+    if (!/^python3(\.\d+)?$/.test(name)) continue;
+    const site = join(lib, name, 'site-packages');
+    if (existsSync(site)) return site;
+  }
+  // 尚未创建完时按常见布局猜测
+  const guessed = readdirSync(lib).find((n) => n.startsWith('python'));
+  return guessed ? join(lib, guessed, 'site-packages') : undefined;
 }
 
 /** 把 Windows NTSTATUS 风格的负数 exitCode 译成可读说明。 */

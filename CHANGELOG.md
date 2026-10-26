@@ -1,3 +1,7 @@
+## 0.1.3
+
+- Slice A (Linux prep): `createSandboxRunner()` (win32→MXC, linux→Bwrap stub), `pythonExecution` = `mxc|bwrap|host`, cross-platform venv/`python-home`/`pe_shell` mapping, `os: [win32, linux]`, MXC as optionalDependency. Linux pip goes through sandbox when not `host`. Bwrap execution lands in slice B.
+
 ## 0.1.2
 
 - Move network blacklist out of config into a prompt-doc editor (`NETWORK_BLACKLIST.md`, same WebUI tab as the env prompt). Legacy `worlds.pythonenv.networkBlacklist` migrates once on start. Remove diagnostic `scripts/` probes.

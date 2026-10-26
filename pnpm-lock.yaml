@@ -7,10 +7,6 @@ settings:
 importers:
 
   .:
-    dependencies:
-      '@microsoft/mxc-sdk':
-        specifier: ^1.0.1
-        version: 1.0.1
     devDependencies:
       '@types/node':
         specifier: ^22.10.0
@@ -27,6 +23,10 @@ importers:
       vitest:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.5)
+    optionalDependencies:
+      '@microsoft/mxc-sdk':
+        specifier: ^1.0.1
+        version: 1.0.1
 
 packages:
 
@@ -1482,6 +1482,7 @@ snapshots:
       koffi: 3.3.4
       node-pty: 1.1.0
       semver: 7.8.5
+    optional: true
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
@@ -2014,6 +2015,7 @@ snapshots:
       '@koromix/koffi-win32-arm64': 3.3.4
       '@koromix/koffi-win32-ia32': 3.3.4
       '@koromix/koffi-win32-x64': 3.3.4
+    optional: true
 
   loupe@3.2.1: {}
 
@@ -2045,11 +2047,13 @@ snapshots:
 
   negotiator@0.6.3: {}
 
-  node-addon-api@7.1.1: {}
+  node-addon-api@7.1.1:
+    optional: true
 
   node-pty@1.1.0:
     dependencies:
       node-addon-api: 7.1.1
+    optional: true
 
   object-inspect@1.13.4: {}
 
@@ -2146,7 +2150,8 @@ snapshots:
 
   scheduler@0.28.0: {}
 
-  semver@7.8.5: {}
+  semver@7.8.5:
+    optional: true
 
   send@0.19.2:
     dependencies:

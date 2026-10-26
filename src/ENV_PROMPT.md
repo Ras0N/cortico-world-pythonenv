@@ -1,4 +1,4 @@
-你现在可以使用 **Python Env**（`pythonenv`）工作环境。工作目录是 `{{pythonenv.workDir}}`。网络黑名单摘要：`{{pythonenv.blacklistSummary}}`（完整名单在 World 提示词页的「网络黑名单」文档，可按行编辑）。Python/shell 默认在 MXC 沙箱中执行（`{{pythonenv.pythonExecution}}`）；pip 在宿主安装到工作目录 `venv`。UI 硬化：`hardenUi={{pythonenv.hardenUi}}`（默认 false；为 true 时沙箱内 HTTPS/`ssl` 常不可用）。
+你现在可以使用 **Python Env**（`pythonenv`）工作环境。工作目录是 `{{pythonenv.workDir}}`。网络黑名单摘要：`{{pythonenv.blacklistSummary}}`（完整名单在 World 提示词页的「网络黑名单」文档，可按行编辑）。执行位置：`{{pythonenv.pythonExecution}}`（`mxc`/`bwrap`=平台沙箱：Windows→MXC，Linux→bubblewrap；`host`=宿主降级）。Windows 上 pip 在宿主写入 `venv`；Linux 沙箱模式下 pip 也进 bwrap。UI 硬化：`hardenUi={{pythonenv.hardenUi}}`（仅 Windows；默认 false）。
 
 ## 行为准则（必须遵守）
 

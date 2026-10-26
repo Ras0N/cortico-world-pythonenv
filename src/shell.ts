@@ -58,7 +58,7 @@ export function parseRestrictedShell(command: string): ShellParseResult {
   if (bin.includes('/') || bin.includes('\\') || bin.includes(':')) {
     return { ok: false, reason: 'command binary must be a bare allowlisted name (python, pip, dir, ls, type, cat, mkdir, pwd)' };
   }
-  if (bin === 'powershell' || bin === 'pwsh' || bin === 'cmd' || bin === 'command') {
+  if (bin === 'powershell' || bin === 'pwsh' || bin === 'cmd' || bin === 'command' || bin === 'bash' || bin === 'sh') {
     return { ok: false, reason: `${bin} is not allowed in pe_shell` };
   }
   if (!ALLOWED.has(bin)) {
@@ -67,14 +67,33 @@ export function parseRestrictedShell(command: string): ShellParseResult {
   return { ok: true, argv, display: argv.join(' ') };
 }
 
-/** 将白名单 argv 映射为在工作目录内实际执行的命令行（Windows）。 */
+/** 将白名单 argv 映射为在工作目录内实际执行的命令行。 */
 export function mapShellArgvToCommand(
+  argv: string[],
+  paths: { pythonExe: string; pipExe: string },
+  platform: NodeJS.Platform = process.platform,
+): { ok: true; command: string } | { ok: false; reason: string } {
+  return platform === 'win32'
+    ? mapShellWindows(argv, paths)
+    : mapShellPosix(argv, paths);
+}
+
+function quoteWin(s: string): string {
+  return /\s/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s;
+}
+
+function quotePosix(s: string): string {
+  if (!/[^\w@%+=:,./-]/.test(s)) return s;
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+function mapShellWindows(
   argv: string[],
   paths: { pythonExe: string; pipExe: string },
 ): { ok: true; command: string } | { ok: false; reason: string } {
   const bin = argv[0].toLowerCase().replace(/\.exe$/i, '');
   const rest = argv.slice(1);
-  const q = (s: string) => (/\s/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s);
+  const q = quoteWin;
 
   switch (bin) {
     case 'python':
@@ -93,6 +112,36 @@ export function mapShellArgvToCommand(
       return { ok: true, command: ['cmd.exe /d /s /c mkdir', ...rest.map(q)].join(' ') };
     case 'pwd':
       return { ok: true, command: 'cmd.exe /d /s /c cd' };
+    default:
+      return { ok: false, reason: `unmapped command: ${bin}` };
+  }
+}
+
+function mapShellPosix(
+  argv: string[],
+  paths: { pythonExe: string; pipExe: string },
+): { ok: true; command: string } | { ok: false; reason: string } {
+  const bin = argv[0].toLowerCase();
+  const rest = argv.slice(1);
+  const q = quotePosix;
+
+  switch (bin) {
+    case 'python':
+      return { ok: true, command: [q(paths.pythonExe), ...rest.map(q)].join(' ') };
+    case 'pip':
+      return { ok: true, command: [q(paths.pipExe), ...rest.map(q)].join(' ') };
+    case 'ls':
+    case 'dir':
+      return { ok: true, command: ['ls', ...rest.map(q)].join(' ') };
+    case 'cat':
+    case 'type':
+      if (rest.length !== 1) return { ok: false, reason: 'cat/type requires exactly one relative path' };
+      return { ok: true, command: `cat ${q(rest[0])}` };
+    case 'mkdir':
+      if (rest.length < 1) return { ok: false, reason: 'mkdir requires a relative path' };
+      return { ok: true, command: ['mkdir', ...rest.map(q)].join(' ') };
+    case 'pwd':
+      return { ok: true, command: 'pwd' };
     default:
       return { ok: false, reason: `unmapped command: ${bin}` };
   }
