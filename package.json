@@ -1,0 +1,57 @@
+{
+  "name": "cortico-world-pythonenv",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Cortico World: sandboxed Python work directory with pip, restricted shell, audit, and high-risk deny rules (Windows / MXC).",
+  "license": "MIT",
+  "os": [
+    "win32"
+  ],
+  "keywords": [
+    "cortico-world",
+    "cortico"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.28.6",
+  "main": "./src/index.ts",
+  "cortico": {
+    "kind": "world",
+    "api": 6,
+    "displayName": "Python Env",
+    "tags": [],
+    "describe": "describe.json",
+    "locales": {
+      "zh": {
+        "displayName": "Python 工作环境",
+        "description": "在用户自选工作目录内提供受限的文件、Python、pip 与 shell；Windows 下经 MXC 隔离，高危操作默认拒绝。"
+      },
+      "en": {
+        "displayName": "Python Env",
+        "description": "Sandboxed file, Python, pip and shell tools inside a user-chosen work directory; Windows isolation via MXC; high-risk actions denied by default."
+      }
+    }
+  },
+  "files": [
+    "src",
+    "README.md",
+    "CHANGELOG.md",
+    "describe.json",
+    "THIRD_PARTY.md"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@microsoft/mxc-sdk": "^1.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "cortico": "^0.2.7",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

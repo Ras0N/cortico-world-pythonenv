@@ -1,0 +1,65 @@
+# Dependencies & package managers
+node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build / test outputs
+dist/
+build/
+coverage/
+.vitest/
+*.tsbuildinfo
+
+# Logs & local debug dumps
+*.log
+logs/
+venv-state/
+last-*-stderr.txt
+last-*-stdout.txt
+
+# Local Python environments (never commit workdirs / venvs)
+venv/
+.venv/
+.env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Secrets, credentials, private config (do not upload)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*secret*
+*credentials*
+*apikey*
+*api_key*
+github-token.json
+*.local
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+*.swp
+*~
+
+# Cursor / agent local state (if present under the package)
+.cursor/
+.agent/
+agent-tools/
+
+# Optional: local scratch / playground copies mistakenly placed in-repo
+coopanion_playground/
+*_playground/

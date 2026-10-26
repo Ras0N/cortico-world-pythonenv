@@ -1,0 +1,226 @@
+{
+  "tools": [
+    {
+      "name": "pe_list",
+      "description": "List files and directories under a relative path inside the Python Env work directory.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Relative path inside the work directory (default \".\")."
+          }
+        }
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "列出工作目录内相对路径下的文件与文件夹。",
+        "en": "List entries under a relative path in the work directory."
+      }
+    },
+    {
+      "name": "pe_read",
+      "description": "Read a text file inside the work directory (size-capped).",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Relative file path inside the work directory."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "读取工作目录内的文本文件。",
+        "en": "Read a text file inside the work directory."
+      }
+    },
+    {
+      "name": "pe_write",
+      "description": "Write or overwrite a text file inside the work directory (creates parent dirs).",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Relative file path inside the work directory."
+          },
+          "content": {
+            "type": "string",
+            "description": "File contents to write."
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ]
+      },
+      "tags": [
+        "write"
+      ],
+      "summary": {
+        "zh": "写入工作目录内的文本文件。",
+        "en": "Write a text file inside the work directory."
+      }
+    },
+    {
+      "name": "pe_delete",
+      "description": "Delete a file or empty directory inside the work directory.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Relative path inside the work directory."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "tags": [
+        "write"
+      ],
+      "summary": {
+        "zh": "删除工作目录内的文件或空目录。",
+        "en": "Delete a file or empty directory inside the work directory."
+      }
+    },
+    {
+      "name": "pe_run_python",
+      "description": "Run a script or -c code with the work directory venv Python (sandboxed).",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "script": {
+            "type": "string",
+            "description": "Relative .py path inside the work directory."
+          },
+          "code": {
+            "type": "string",
+            "description": "Python source for python -c (mutually exclusive with script)."
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Extra argv after the script (ignored for -c)."
+          }
+        }
+      },
+      "tags": [
+        "write"
+      ],
+      "summary": {
+        "zh": "用工作目录 venv 运行脚本或 -c 代码。",
+        "en": "Run a script or -c with the work-dir venv Python."
+      }
+    },
+    {
+      "name": "pe_pip",
+      "description": "Run pip install/uninstall/list/show against the work directory venv only.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "install",
+              "uninstall",
+              "list",
+              "show"
+            ],
+            "description": "pip subcommand."
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Package names (required for install/uninstall/show)."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "tags": [
+        "write"
+      ],
+      "summary": {
+        "zh": "对工作目录 venv 执行 pip install/uninstall/list/show。",
+        "en": "pip install/uninstall/list/show against the work-dir venv."
+      }
+    },
+    {
+      "name": "pe_shell",
+      "description": "Run one allowlisted command (python, pip, dir/ls, type/cat, mkdir, pwd) inside the sandbox. No pipes or redirects.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Single allowlisted command line."
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "tags": [
+        "write"
+      ],
+      "summary": {
+        "zh": "在沙箱内运行白名单命令（无管道/重定向）。",
+        "en": "Run one allowlisted command in the sandbox (no pipes/redirects)."
+      }
+    }
+  ],
+  "events": [
+    {
+      "type": "pythonenv.ready",
+      "description": {
+        "zh": "工作环境已就绪。",
+        "en": "The Python Env workbench is ready."
+      }
+    },
+    {
+      "type": "pythonenv.error",
+      "description": {
+        "zh": "启动或运行失败。",
+        "en": "Start or runtime failure."
+      }
+    },
+    {
+      "type": "pythonenv.denied",
+      "description": {
+        "zh": "高危或越界操作被拒绝。",
+        "en": "A high-risk or out-of-bounds action was denied."
+      }
+    }
+  ],
+  "prompts": [
+    {
+      "key": "worlds.pythonenv.envPrompt",
+      "title": "Python Env · 环境提示词",
+      "role": "envPrompt",
+      "content": "你现在可以使用 **Python Env**（`pythonenv`）工作环境。工作目录是 `{{pythonenv.workDir}}`。网络黑名单：`{{pythonenv.blacklistSummary}}`。Python/shell 默认在 MXC 沙箱中执行（`{{pythonenv.pythonExecution}}`）；pip 在宿主安装到工作目录 `venv`。沙箱内若 HTTPS/`ssl` 不可用，用专用网络工具或 HTTP，不要要求把任意代码放到宿主执行。\n\n## 行为准则（必须遵守）\n\n1. **边界**：所有文件与代码只能放在工作目录的相对路径下。禁止访问、探测或修改工作目录以外的本机路径（包括用户主目录、AppData、系统目录）。\n2. **工具**：只用 `pe_list` / `pe_read` / `pe_write` / `pe_delete` / `pe_run_python` / `pe_pip` / `pe_shell`。不要尝试绕过沙箱或改用未授权解释器。\n3. **密钥与隐私**：不要读取、打印、外传 API Key、令牌、私钥、`.env` 机密或浏览器/SSH 等隐私数据。若任务需要密钥，应请用户在工作目录内自行放置并避免写入对话。\n4. **安装与运行**：第三方库只用 `pe_pip` 装进当前 `venv`；运行代码用 `pe_run_python` 或受限的 `pe_shell`（仅 python/pip/dir/ls/type/cat/mkdir/pwd，无管道与重定向）。\n5. **网络**：不要访问黑名单中的主机，不要尝试用代理、DNS 技巧或原始套接字绕过限制。需要 HTTPS 时使用当前配置的执行位置（默认 host）。\n6. **被拒绝时**：根据回执改用安全方案；不要换成更隐蔽的手法重试同一高危意图（逃逸、横向移动、破坏系统、投递 shellcode 等）。\n\n默认策略是：**越界与高危操作一律拒绝**，并写入工作目录下 `venv-state/audit.jsonl` 审计日志。\n"
+    }
+  ]
+}

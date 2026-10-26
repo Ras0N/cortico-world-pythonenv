@@ -1,0 +1,6 @@
+allowBuilds:
+  esbuild: true
+  koffi: true
+  node-pty: true
+minimumReleaseAgeExclude:
+  - cortico@0.2.7
