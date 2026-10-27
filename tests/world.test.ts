@@ -41,6 +41,7 @@ describe('Python Env World', () => {
     const vars = world.envPromptVars();
     expect(vars?.['pythonenv.hardenUi']).toBe('false');
     expect(['mxc', 'bwrap', 'host']).toContain(vars?.['pythonenv.pythonExecution']);
+    expect(['mxc', 'bwrap', 'host']).toContain(vars?.['pythonenv.sandboxBackend']);
     const docs = world.webUi().promptDocs ?? [];
     expect(docs.map((d) => d.key)).toEqual([
       'worlds.pythonenv.envPrompt',
@@ -63,10 +64,13 @@ describe('Python Env World', () => {
     expect(host.events.map((e) => e.type)).toContain('pythonenv.error');
   });
 
-  it('挂载成功推送 pythonenv.ready 并注入 sitecustomize', async () => {
+  it('挂载成功推送 pythonenv.ready 并注入 hooks', async () => {
     const { world, host } = await startedWorld();
     expect(host.events.map((e) => e.type)).toEqual(['pythonenv.ready']);
-    expect(existsSync(join(scratchDir, 'venv', 'Lib', 'site-packages', 'sitecustomize.py'))).toBe(true);
+    const site = join(scratchDir, 'venv', 'Lib', 'site-packages');
+    expect(existsSync(join(site, 'pythonenv_hooks.py'))).toBe(true);
+    expect(existsSync(join(site, 'pythonenv_hooks.pth'))).toBe(true);
+    expect(existsSync(join(site, 'sitecustomize.py'))).toBe(true);
     await world.stop();
   });
 

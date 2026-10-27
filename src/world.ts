@@ -18,7 +18,7 @@ import { VENV_DIR, VENV_STATE_DIR } from './layout.ts';
 import { normalizeWorkDir, resolveInWorkDir } from './paths.ts';
 import {
   describeWindowsExitCode,
-  mirrorPythonDllsIntoVenv,
+  injectPythonenvHooks,
   resolveHostPythonExecutable,
   resolvePythonReadonlyRoots,
   resolveSystemReadonlyRoots,
@@ -27,9 +27,11 @@ import {
   venvSitePackagesDir,
 } from './python-home.ts';
 import { redactSecrets, scanForHighRisk } from './rules.ts';
+import { resolveBwrapBinary } from './sandbox/bwrap.ts';
 import { createSandboxRunner, isPlatformSandboxRunner } from './sandbox/index.ts';
 import type { CommandRunner, RunResult } from './sandbox/types.ts';
 import { mapShellArgvToCommand, parseRestrictedShell } from './shell.ts';
+import { bootstrapVenvOnHost } from './venv-bootstrap.ts';
 
 const ENV_PROMPT_FILE = fileURLToPath(new URL('./ENV_PROMPT.md', import.meta.url));
 const NETWORK_BLACKLIST_FILE = fileURLToPath(new URL('./NETWORK_BLACKLIST.md', import.meta.url));
@@ -172,8 +174,15 @@ export class PythonEnvWorld implements World {
       'pythonenv.workDir': work,
       'pythonenv.blacklistSummary': summarizeBlacklist(bl),
       'pythonenv.pythonExecution': exec,
+      'pythonenv.sandboxBackend': this.sandboxBackendLabel(),
       'pythonenv.hardenUi': this.opts.cfg.hardenUi ? 'true' : 'false',
     };
+  }
+
+  /** 实际隔离后端（给提示词用）：host / mxc / bwrap。 */
+  private sandboxBackendLabel(): string {
+    if (!isSandboxExecution(this.opts.cfg.pythonExecution)) return 'host';
+    return process.platform === 'linux' ? 'bwrap' : 'mxc';
   }
 
   tools(): ToolDef[] {
@@ -196,7 +205,11 @@ export class PythonEnvWorld implements World {
           vars: [
             { name: 'pythonenv.workDir', description: '当前配置的工作目录。' },
             { name: 'pythonenv.blacklistSummary', description: '网络黑名单摘要（完整名单见同页另一文档）。' },
-            { name: 'pythonenv.pythonExecution', description: 'mxc / bwrap / host。' },
+            { name: 'pythonenv.pythonExecution', description: 'mxc / bwrap / host（配置值）。' },
+            {
+              name: 'pythonenv.sandboxBackend',
+              description: '实际后端：Windows 沙箱=mxc，Linux 沙箱=bwrap，否则 host。',
+            },
             {
               name: 'pythonenv.hardenUi',
               description: '仅 Windows：true 时 MXC ui.disable（HTTPS 常不可用）。',
@@ -241,6 +254,7 @@ export class PythonEnvWorld implements World {
       workDir: wd.abs,
       containment: this.opts.cfg.containment,
       pythonExecution: this.opts.cfg.pythonExecution,
+      sandboxBackend: this.sandboxBackendLabel(),
       hardenUi: this.opts.cfg.hardenUi === true,
       blacklistCount: blacklist.length,
       pythonPath: this.hostPython(),
@@ -248,20 +262,28 @@ export class PythonEnvWorld implements World {
       readonlyPaths,
       systemReadonlyPaths: resolveSystemReadonlyRoots(),
       platform: process.platform,
-      note: 'venv bootstrap runs on host; user Python/shell default MXC (hardenUi=false keeps ssl)',
+      note:
+        'venv bootstrap always on host; runtime: Windows MXC (pip on host) / Linux bwrap (pip in sandbox)',
     });
     if (readonlyPaths.length === 0) {
-      writeDebug(wd.abs, 'warn', 'no host Python readonly roots; MXC may fail with STATUS_DLL_NOT_FOUND', {
+      writeDebug(wd.abs, 'warn', 'no host Python readonly roots; sandbox may fail to load stdlib', {
         hostPy,
       });
     }
 
     try {
-      // 测试注入的 FakeRunner 走沙箱模拟；生产环境在宿主建 venv（避开 AppContainer 下 _ssl/_ctypes 失败）
+      // Linux 沙箱模式：尽早探测 bwrap，避免建完 venv 才硬失败
+      if (process.platform === 'linux' && isSandboxExecution(this.opts.cfg.pythonExecution)) {
+        const bwrapBin = resolveBwrapBinary();
+        writeDebug(wd.abs, 'info', 'bwrap available', { bwrapBin });
+      }
+      // FakeRunner → 模拟路径；生产 → 宿主建 venv（Win 避开 MXC ensurepip/_ssl；Linux 同路径更简单可靠）
       await this.ensureVenv(host);
       if (!this.runner) this.runner = createSandboxRunner();
       this.injectSitecustomize(wd.abs);
-      writeDebug(wd.abs, 'info', 'sitecustomize injected');
+      writeDebug(wd.abs, 'info', 'sitecustomize injected', {
+        sitePackages: venvSitePackagesDir(this.venvRoot(wd.abs)),
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       writeDebug(wd.abs, 'error', 'start failed', {
@@ -343,12 +365,24 @@ export class PythonEnvWorld implements World {
   }
 
   private sandboxEnv(workDirAbs: string): Record<string, string> {
-    // ensurepip / pip 默认写 %TEMP%；沙箱往往读不到宿主 Temp → 指到工作目录内。
+    // ensurepip / pip 默认写 TEMP；沙箱往往读不到宿主 Temp → 指到工作目录内。
     const tmp = this.sandboxTempDir(workDirAbs);
     mkdirSync(tmp, { recursive: true });
+    const hostPy = resolveHostPythonExecutable(this.hostPython());
+    const readonlyPrefixes = uniqueComma([
+      ...resolvePythonReadonlyRoots(hostPy),
+      ...resolveSystemReadonlyRoots(),
+      // Linux：动态库 / CA（sitecustomize 只读放行；写入仍限 workDir）
+      ...(process.platform === 'linux'
+        ? ['/usr/lib', '/usr/local/lib', '/lib', '/lib64', '/etc/ssl', '/etc/pki']
+        : []),
+    ]);
     return {
       PYTHONENV_WORKDIR: workDirAbs,
       PYTHONENV_NET_BLACKLIST: this.networkBlacklist().join(','),
+      PYTHONENV_READONLY_PREFIXES: readonlyPrefixes,
+      // Linux：避免 Hyper-V 等环境 IPv6 黑洞拖死 HTTPS（见 sitecustomize getaddrinfo）
+      ...(process.platform === 'linux' ? { PYTHONENV_PREFER_IPV4: '1' } : {}),
       PYTHONNOUSERSITE: '1',
       PIP_DISABLE_PIP_VERSION_CHECK: '1',
       TEMP: tmp,
@@ -362,7 +396,7 @@ export class PythonEnvWorld implements World {
     if (!site || !existsSync(site)) {
       throw new Error(`venv site-packages missing under ${this.venvRoot(workDirAbs)}`);
     }
-    copyFileSync(SITECUSTOMIZE_SRC, join(site, 'sitecustomize.py'));
+    injectPythonenvHooks(site, SITECUSTOMIZE_SRC);
   }
 
   private removeVenvTree(workDirAbs: string): void {
@@ -378,7 +412,7 @@ export class PythonEnvWorld implements World {
   }
 
   private async ensureVenv(host: WorldHost): Promise<void> {
-    // 单元测试注入的 FakeRunner 走模拟路径；平台沙箱 runner 仍在宿主建 venv
+    // FakeRunner → 模拟；生产一律宿主 bootstrap（见 ensureVenvOnHost 注释）
     if (this.runner && !isPlatformSandboxRunner(this.runner)) {
       await this.ensureVenvWithRunner(host, this.runner);
       return;
@@ -386,6 +420,11 @@ export class PythonEnvWorld implements World {
     await this.ensureVenvOnHost(host);
   }
 
+  /**
+   * 在宿主创建 workDir/venv（切片 C 决策：两平台均宿主 bootstrap）。
+   * - Windows：`--without-pip` + ensurepip + DLL 镜像（避开 MXC）。
+   * - Linux：`python -m venv` 一次带 pip（需 apt: python3-venv）；运行期再进 bwrap。
+   */
   private async ensureVenvOnHost(host: WorldHost): Promise<void> {
     const workDirAbs = this.requireWorkDir();
     const py = this.venvPython(workDirAbs);
@@ -398,46 +437,25 @@ export class PythonEnvWorld implements World {
     const hostPy = resolveHostPythonExecutable(this.hostPython());
     const timeoutMs = Math.max(this.opts.cfg.commandTimeoutMs, 120_000);
     const env = this.sandboxEnv(workDirAbs);
-    const createCmd = `${quoteCmd(hostPy)} -m venv --without-pip ${VENV_DIR}`;
-    writeDebug(workDirAbs, 'info', 'creating venv on host (not MXC)', {
-      createCmd,
-      hostPy,
-      temp: this.sandboxTempDir(workDirAbs),
-      reason: 'MXC AppContainer often breaks import _ssl/_ctypes during ensurepip',
-    });
-
-    let result = await runOnHost({ command: createCmd, cwd: workDirAbs, env, timeoutMs });
-    writeDebugOutputFiles(workDirAbs, 'venv-create', result);
-    writeDebug(workDirAbs, 'info', 'venv create finished', {
-      exitCode: result.exitCode,
-      timedOut: result.timedOut,
-      exitMeaning: describeWindowsExitCode(result.exitCode),
-    });
-    if (result.exitCode !== 0 || !existsSync(py)) {
+    try {
+      const boot = await bootstrapVenvOnHost({
+        workDirAbs,
+        hostPythonAbs: hostPy,
+        env,
+        timeoutMs,
+        onLog: (msg, data) => writeDebug(workDirAbs, 'info', msg, data),
+      });
+      writeDebug(workDirAbs, 'info', 'venv bootstrap finished', {
+        venvPython: boot.venvPython,
+        venvPip: boot.venvPip,
+        pipViaVenvModule: boot.pipViaVenvModule,
+        platform: process.platform,
+      });
+    } catch (e) {
       this.removeVenvTree(workDirAbs);
-      const detail = clip(`${result.stderr}\n${result.stdout}`, this.opts.cfg.maxOutputBytes);
-      host.log.warn('venv creation failed', { detail, exitCode: result.exitCode });
-      throw new Error(`failed to create venv on host (exit ${result.exitCode}): ${detail}`);
-    }
-
-    const copied = mirrorPythonDllsIntoVenv(hostPy, this.venvRoot(workDirAbs));
-    writeDebug(workDirAbs, 'info', 'mirrored Python DLLs into venv', { copied });
-
-    const pipCmd = `${quoteCmd(py)} -m ensurepip --upgrade --default-pip`;
-    writeDebug(workDirAbs, 'info', 'bootstrapping pip on host', { pipCmd });
-    result = await runOnHost({ command: pipCmd, cwd: workDirAbs, env, timeoutMs });
-    writeDebugOutputFiles(workDirAbs, 'ensurepip', result);
-    writeDebug(workDirAbs, 'info', 'ensurepip finished', {
-      exitCode: result.exitCode,
-      timedOut: result.timedOut,
-    });
-    if (result.exitCode !== 0 || !existsSync(this.venvPip(workDirAbs))) {
-      this.removeVenvTree(workDirAbs);
-      const detail = clip(`${result.stderr}\n${result.stdout}`, this.opts.cfg.maxOutputBytes);
-      host.log.warn('ensurepip failed', { detail, exitCode: result.exitCode });
-      throw new Error(
-        `failed to bootstrap pip on host (exit ${result.exitCode}): ${detail} (full text: venv-state/last-ensurepip-stderr.txt)`,
-      );
+      const msg = e instanceof Error ? e.message : String(e);
+      host.log.warn('venv bootstrap failed', { err: msg.slice(0, 1500) });
+      throw e;
     }
   }
 
@@ -837,6 +855,18 @@ export class PythonEnvWorld implements World {
 function quoteCmd(s: string): string {
   if (!/[ \t"]/g.test(s)) return s;
   return `"${s.replace(/"/g, '\\"')}"`;
+}
+
+function uniqueComma(paths: string[]): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of paths) {
+    const key = p.replace(/[\\/]+$/, '');
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out.join(',');
 }
 
 function clip(s: string, max: number): string {

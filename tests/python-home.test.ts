@@ -1,13 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   describeWindowsExitCode,
+  injectPythonenvHooks,
   resolvePythonReadonlyRoots,
   venvPipPath,
   venvPythonPath,
 } from '../src/python-home.ts';
+
+const HOOKS_SRC = join(dirname(fileURLToPath(import.meta.url)), '../src/assets/sitecustomize.py');
 
 let root: string;
 beforeEach(() => {
@@ -34,5 +38,13 @@ describe('python-home', () => {
     const v = join(root, 'venv');
     expect(venvPythonPath(v, 'win32')).toMatch(/Scripts[\\/]python\.exe$/i);
     expect(venvPipPath(v, 'linux')).toMatch(/bin[/\\]pip$/i);
+  });
+
+  it('injects pythonenv_hooks module + pth (+ sitecustomize copy)', () => {
+    const site = join(root, 'site-packages');
+    injectPythonenvHooks(site, HOOKS_SRC);
+    expect(existsSync(join(site, 'pythonenv_hooks.py'))).toBe(true);
+    expect(existsSync(join(site, 'sitecustomize.py'))).toBe(true);
+    expect(readFileSync(join(site, 'pythonenv_hooks.pth'), 'utf8')).toBe('import pythonenv_hooks\n');
   });
 });

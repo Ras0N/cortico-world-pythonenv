@@ -12,3 +12,10 @@
 - Source: [github.com/microsoft/mxc](https://github.com/microsoft/mxc)
 - License: **MIT** (Copyright (c) Microsoft Corporation) — see the package `LICENSE.md`.
 - Role: Windows process-level sandbox for running Python / pip / restricted shell inside the work directory.
+
+## bubblewrap (system dependency, Linux)
+
+- Project: [containers/bubblewrap](https://github.com/containers/bubblewrap)
+- License: **LGPL-2.0-or-later** (system package; **not** vendored into this npm package).
+- Role: Linux process sandbox (`bwrap`) for `pythonExecution=bwrap|mxc` on Debian/Ubuntu.
+- Install: `sudo apt install bubblewrap`

@@ -1,6 +1,23 @@
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+
+/** Unique hook module — avoids Debian/Ubuntu stdlib `sitecustomize` (apport) shadowing. */
+export const PYTHONENV_HOOKS_MODULE = 'pythonenv_hooks.py';
+export const PYTHONENV_HOOKS_PTH = 'pythonenv_hooks.pth';
+
+/**
+ * Inject FS/net hooks into a venv site-packages dir.
+ * Uses `pythonenv_hooks.pth` → `import pythonenv_hooks` so hooks load even when
+ * distro `sitecustomize` in the stdlib path wins the name. Also copies as
+ * `sitecustomize.py` for hosts without that clash (import is idempotent).
+ */
+export function injectPythonenvHooks(sitePackagesDir: string, hooksSrc: string): void {
+  mkdirSync(sitePackagesDir, { recursive: true });
+  copyFileSync(hooksSrc, join(sitePackagesDir, PYTHONENV_HOOKS_MODULE));
+  copyFileSync(hooksSrc, join(sitePackagesDir, 'sitecustomize.py'));
+  writeFileSync(join(sitePackagesDir, PYTHONENV_HOOKS_PTH), 'import pythonenv_hooks\n', 'utf8');
+}
 
 /**
  * 在宿主上解析 Python 可执行文件的绝对路径（不进沙箱）。
@@ -132,12 +149,14 @@ export function venvSitePackagesDir(venvRoot: string, platform: NodeJS.Platform 
   }
   const lib = join(venvRoot, 'lib');
   if (!existsSync(lib)) return undefined;
-  for (const name of readdirSync(lib)) {
-    if (!/^python3(\.\d+)?$/.test(name)) continue;
+  // 优先 python3.14 这类带小版本的目录，避免误用空的 lib/python3/
+  const names = readdirSync(lib)
+    .filter((n) => /^python3(\.\d+)*$/.test(n))
+    .sort((a, b) => b.length - a.length || b.localeCompare(a));
+  for (const name of names) {
     const site = join(lib, name, 'site-packages');
     if (existsSync(site)) return site;
   }
-  // 尚未创建完时按常见布局猜测
   const guessed = readdirSync(lib).find((n) => n.startsWith('python'));
   return guessed ? join(lib, guessed, 'site-packages') : undefined;
 }
