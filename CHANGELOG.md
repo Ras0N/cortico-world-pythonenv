@@ -1,3 +1,11 @@
+## 0.1.14
+
+- Close Slice D/E (except heavy seccomp): CI (`ubuntu-22.04` + `windows-latest`), acceptance `pip install six`, bwrap `--hostname pythonenv` + clamp `--chdir` to workDir, docs clarify bwrap/MXC ≠ VM, ENV_PROMPT/`pythonenv_hooks` wording.
+
+## 0.1.13
+
+- Allow **read** of `/etc` in pythonenv hooks (pip’s vendored `distro` opens `/etc/debian_version` for User-Agent). Writes outside workDir still denied. Fixes `pe_pip install` PermissionError inside bwrap.
+
 ## 0.1.12
 
 - Load FS/net hooks via `pythonenv_hooks.pth` → `pythonenv_hooks` (not only `sitecustomize.py`). Debian/Ubuntu ship a stdlib `sitecustomize` (apport) that shadows the venv copy, so acceptance saw `hook False` and FS denials fell through to bwrap RO only.

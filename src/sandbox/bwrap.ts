@@ -84,7 +84,10 @@ export function buildBwrapArgv(opts: BwrapArgvOptions): string[] {
     '--unshare-pid',
     '--unshare-uts',
     '--unshare-ipc',
-    // 故意不 --unshare-net：保留出站；黑名单由 sitecustomize / 工具扫描执行
+    // 故意不 --unshare-net：保留出站；黑名单由 hooks / 工具扫描执行
+    // 不绑 /sys、不绑整棵 /run（仅 DNS 相关路径），降低宿主接口暴露面
+    '--hostname',
+    'pythonenv',
     '--dev',
     '/dev',
     '--proc',
@@ -151,7 +154,9 @@ export function buildBwrapArgv(opts: BwrapArgvOptions): string[] {
     args.push('--ro-bind', gaiPath, '/etc/gai.conf');
   }
 
-  args.push('--chdir', cwd);
+  // --chdir 仅允许 workDir 内；越界则回落到 workDir（防御错误/恶意 cwd）
+  const chdir = isInsideWorkDir(cwd, work) ? cwd : work;
+  args.push('--chdir', chdir);
   args.push('--clearenv');
   for (const [key, value] of Object.entries(env)) {
     if (value === undefined || value === null) continue;

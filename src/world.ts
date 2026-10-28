@@ -281,7 +281,7 @@ export class PythonEnvWorld implements World {
       await this.ensureVenv(host);
       if (!this.runner) this.runner = createSandboxRunner();
       this.injectSitecustomize(wd.abs);
-      writeDebug(wd.abs, 'info', 'sitecustomize injected', {
+      writeDebug(wd.abs, 'info', 'pythonenv hooks injected', {
         sitePackages: venvSitePackagesDir(this.venvRoot(wd.abs)),
       });
     } catch (e) {
@@ -372,9 +372,9 @@ export class PythonEnvWorld implements World {
     const readonlyPrefixes = uniqueComma([
       ...resolvePythonReadonlyRoots(hostPy),
       ...resolveSystemReadonlyRoots(),
-      // Linux：动态库 / CA（sitecustomize 只读放行；写入仍限 workDir）
+      // Linux：动态库 + /etc 只读（pip distro 读 debian_version；写入仍限 workDir）
       ...(process.platform === 'linux'
-        ? ['/usr/lib', '/usr/local/lib', '/lib', '/lib64', '/etc/ssl', '/etc/pki']
+        ? ['/usr/lib', '/usr/local/lib', '/lib', '/lib64', '/etc']
         : []),
     ]);
     return {

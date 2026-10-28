@@ -10,4 +10,4 @@
 # 精确主机：
 #   evil.example.com
 #
-# 由工具参数扫描与 venv 内 sitecustomize 钩子执行；改后下次命令即生效，无需重启 World。
+# 由工具参数扫描与 venv 内 pythonenv_hooks 执行；改后下次命令即生效，无需重启 World。

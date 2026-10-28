@@ -61,8 +61,7 @@ try {
       '/usr/lib',
       '/lib',
       '/lib64',
-      '/etc/ssl',
-      '/etc/pki',
+      '/etc',
     ].join(','),
     PYTHONNOUSERSITE: '1',
     TEMP: join(work, VENV_STATE_DIR, 'tmp'),
@@ -182,6 +181,23 @@ try {
   const pipList = await run(`${shellQuote(venvPip)} list`);
   if (pipList.exitCode !== 0) fail(`pip list in bwrap: ${pipList.stderr}`);
   ok('pip list inside bwrap');
+
+  // 真装一个小包，覆盖 pe_pip 同路径（bwrap 内 pip + hooks 读 /etc）
+  const pipInstall = await run(
+    `${shellQuote(venvPip)} install --no-cache-dir --disable-pip-version-check six`,
+    undefined,
+    180_000,
+  );
+  if (pipInstall.exitCode !== 0) {
+    fail(`pip install six in bwrap: ${fmt(pipInstall)}`);
+  }
+  const importSix = await run(
+    `${shellQuote(venvPy)} -c "import six; print('six', six.__version__, flush=True)"`,
+  );
+  if (importSix.exitCode !== 0 || !/six /.test(importSix.stdout)) {
+    fail(`import six after pip install: ${fmt(importSix)}`);
+  }
+  ok('pip install six + import inside bwrap');
 
   console.log('all acceptance checks passed');
 } catch (e) {

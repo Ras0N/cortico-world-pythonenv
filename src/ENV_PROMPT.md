@@ -2,9 +2,11 @@
 
 执行配置：`pythonExecution={{pythonenv.pythonExecution}}`；**实际隔离后端**：`{{pythonenv.sandboxBackend}}`（Windows 沙箱 → **MXC**；Linux 沙箱 → **bubblewrap**；`host` = 无沙箱降级）。Windows 上 pip 在宿主写入 `venv`，Python/shell 进 MXC；Linux 沙箱模式下 **Python / pip / shell 均进 bwrap**。`hardenUi={{pythonenv.hardenUi}}`（仅 Windows；默认 false）。
 
+说明：bubblewrap / MXC 是**进程级沙箱**，不是完整虚拟机；隔离边界是工作目录 + 只读系统树，不是硬件级 guest。
+
 ## 行为准则（必须遵守）
 
-1. **边界**：所有文件与代码只能放在工作目录的相对路径下。禁止访问、探测或修改工作目录以外的本机路径（包括用户主目录、AppData、系统目录）。沙箱（MXC/bwrap）与 Python `sitecustomize` 钩子双保险。
+1. **边界**：所有文件与代码只能放在工作目录的相对路径下。禁止访问、探测或修改工作目录以外的本机路径（包括用户主目录、AppData、系统目录）。沙箱（MXC/bwrap）与 Python `pythonenv_hooks` 双保险。
 2. **工具**：只用 `pe_list` / `pe_read` / `pe_write` / `pe_delete` / `pe_run_python` / `pe_pip` / `pe_shell`。不要尝试绕过沙箱或改用未授权解释器。
 3. **密钥与隐私**：不要读取、打印、外传 API Key、令牌、私钥、`.env` 机密或浏览器/SSH 等隐私数据。若任务需要密钥，应请用户在工作目录内自行放置并避免写入对话。
 4. **安装与运行**：第三方库只用 `pe_pip` 装进当前 `venv`；运行代码用 `pe_run_python` 或受限的 `pe_shell`（仅 python/pip/dir/ls/type/cat/mkdir/pwd，无管道与重定向）。

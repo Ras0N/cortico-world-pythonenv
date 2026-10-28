@@ -33,17 +33,32 @@ describe('bwrap argv', () => {
     expect(argv).toContain('--unshare-uts');
     expect(argv).toContain('--unshare-ipc');
     expect(argv).not.toContain('--unshare-net');
+    expect(argv).toContain('--hostname');
+    expect(argv[argv.indexOf('--hostname') + 1]).toBe('pythonenv');
     expect(argv).toContain('--clearenv');
     expect(argv).toContain('--bind');
     expect(argv).toContain(work);
     expect(argv).toContain('--ro-bind-try');
     expect(argv.slice(-4)).toEqual(['--', '/bin/sh', '-c', 'python3 -c "print(1)"']);
     expect(argv).toContain('PYTHONENV_WORKDIR');
+    const chdirIdx = argv.indexOf('--chdir');
+    expect(chdirIdx).toBeGreaterThan(-1);
+    expect(argv[chdirIdx + 1]).toBe(work);
     for (const dns of BWRAP_DNS_ROOTS) {
       expect(argv).toContain(dns);
     }
     expect(argv).toContain('/etc/gai.conf');
     expect(GAI_CONF_PREFER_IPV4).toMatch(/precedence :ffff:0:0\/96/);
+  });
+
+  it('clamps --chdir to workDir when cwd escapes', () => {
+    const argv = buildBwrapArgv({
+      workDirAbs: work,
+      cwd: '/etc',
+      command: 'true',
+      systemRoots: [],
+    });
+    expect(argv[argv.indexOf('--chdir') + 1]).toBe(work.replace(/\/+$/, '') || work);
   });
 
   it('skips readonlyPaths that sit inside workDir', () => {

@@ -17,5 +17,5 @@
 
 - Project: [containers/bubblewrap](https://github.com/containers/bubblewrap)
 - License: **LGPL-2.0-or-later** (system package; **not** vendored into this npm package).
-- Role: Linux process sandbox (`bwrap`) for `pythonExecution=bwrap|mxc` on Debian/Ubuntu.
+- Role: Linux **process** sandbox (`bwrap`) for `pythonExecution=bwrap|mxc` on Debian/Ubuntu — namespaces + bind mounts, **not** a full VM.
 - Install: `sudo apt install bubblewrap`

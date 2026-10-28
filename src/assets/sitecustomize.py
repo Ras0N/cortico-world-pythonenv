@@ -3,7 +3,8 @@
 # (Debian/Ubuntu ship a stdlib sitecustomize for apport that shadows venv sitecustomize.py).
 # Also copied as sitecustomize.py where that name is free; imports are idempotent.
 # - Writes: only inside PYTHONENV_WORKDIR.
-# - Reads: workdir + PYTHONENV_READONLY_PREFIXES (host Python / system libs) + TLS trust stores.
+# - Reads: workdir + PYTHONENV_READONLY_PREFIXES (host Python / system libs) + /etc + CA paths.
+#   (/etc read is required: pip's vendored distro opens /etc/debian_version for User-Agent.)
 # Primary FS isolation is MXC (Windows) or bubblewrap (Linux); this is a second line of defense.
 # Native code that bypasses Python I/O is not covered.
 
@@ -28,14 +29,14 @@ else:
         for x in os.environ.get("PYTHONENV_READONLY_PREFIXES", "").split(",")
         if x.strip()
     ]
-    # Always allow interpreter trees + common CA paths (HTTPS inside bwrap/MXC).
+    # Always allow interpreter trees, /etc (pip User-Agent / os-release), CA paths.
+    # Writes outside workDir stay denied even when the path is under a readonly prefix.
     for _cand in (
         getattr(sys, "base_prefix", "") or "",
         getattr(sys, "base_exec_prefix", "") or "",
         sys.prefix,
         sys.exec_prefix,
-        "/etc/ssl",
-        "/etc/pki",
+        "/etc",
         "/usr/share/ca-certificates",
     ):
         if _cand and _cand not in _READONLY_PREFIXES:
