@@ -1,6 +1,13 @@
 # cortico-world-pythonenv
 
-Cortico / Coopanion **World** 扩展：在用户自选的工作目录内提供受限文件操作、`venv` Python / pip、白名单 shell；规则特征命中则**默认拒绝**；审计写入工作目录 `venv-state/audit.jsonl`。不读取、不上传你的 API Key 或隐私数据。
+该项目是一个 Cortico / Coopanion **World** 扩展。
+
+功能：
+
+1. 给Coopanaion提供一个封闭的python工作环境，在用户自选的工作目录内提供受限文件操作、python虚拟环境以及有限的shell功能；
+2. 模型可以通过该插件联网，运行部分脚本；
+3. 所有操作都将计入审计文件当中。
+
 
 |          |                                                                                       |
 | -------- | ------------------------------------------------------------------------------------- |
@@ -17,7 +24,6 @@ Cortico / Coopanion **World** 扩展：在用户自选的工作目录内提供�
 | `venv/`       | Python 虚拟环境（解释器与 site-packages）         |
 | `venv-state/` | 插件状态：`debug.log`、`audit.jsonl`、沙箱 `tmp/` |
 
-World 配置段仍叫 `worlds.pythonenv`（Cortico id）；与上述文件夹名无关。
 
 ## 系统要求
 
@@ -26,16 +32,16 @@ World 配置段仍叫 `worlds.pythonenv`（Cortico id）；与上述文件夹名
 - 已安装可用的 **Python 3**（用于创建工作目录下的 `venv`）。
 - 运行 Coopanion / Cortico 的 Node：**≥ 22**（本包 `engines`）；Windows 上使用 MXC 时建议 **≥ 24**（MXC SDK 要求）。
 
-### Windows（已实现）
+### Windows
 
 - 主机满足 [MXC](https://github.com/microsoft/mxc) **process containment** 要求。
 - 隔离后端：`@microsoft/mxc-sdk`（MIT）。
 - 默认 `pythonExecution=mxc`：Python / shell 进 MXC；**pip 仍在宿主**（安装面与执行面分离）。
 - `hardenUi`：默认 `false`（保留 HTTPS）；`true` 时更强 UI 隔离但常导致 `_ssl` 失败。
 
-### Linux（已实现 / Debian 系）
+### Linux（Debian 系）
 
-目标发行版（其它暂不考虑）：
+目标发行版：
 
 | 发行版 | 最低版本      |
 | ------ | ------------- |
@@ -52,8 +58,6 @@ World 配置段仍叫 `worlds.pythonenv`（Cortico id）；与上述文件夹名
   sudo apt update
   sudo apt install -y bubblewrap python3 python3-venv python3-pip
   ```
-
-  （系统 Python 默认**没有** `ensurepip` 模块，这是发行版拆包，不是扩展漏 import。）
 
 - 隔离目标与 Windows MXC **对齐**：workDir 可写、宿主 Python 树只读、出站默许 + 网络黑名单软拦。
 - **bubblewrap ≠ 虚拟机**：进程级命名空间隔离（工作目录可写 + 系统树只读），不是完整 guest OS。
@@ -82,15 +86,13 @@ corepack pnpm install
 pnpm test
 ```
 
-Linux 虚拟机验收（需已安装 `bubblewrap` + `python3`）：
+Linux 验收（需已安装 `bubblewrap` + `python3`）：
 
 ```bash
 sudo apt update && sudo apt install -y bubblewrap python3
 pnpm smoke:bwrap          # 最小：bwrap + import ssl
 pnpm smoke:bwrap:accept   # hooks / HTTPS / FS / 黑名单 / pip list / pip install six
 ```
-
-CI：推送后跑 `.github/workflows/ci.yml`（Windows 单测 + Ubuntu 22.04 单测与 `smoke:bwrap*`）。
 
 **venv 策略**：两平台均在**宿主**创建 `workDir/venv`；Windows 运行期 MXC（pip 仍宿主），Linux 运行期 bwrap（python/pip/shell 均进沙箱）。
 
