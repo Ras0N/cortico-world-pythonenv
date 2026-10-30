@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { ToolCallContext } from 'cortico/core/types.ts';
 import { dryMountWorld, fakeWorldContext } from 'cortico/extensions/dry-mount.ts';
 import { PYTHONENV } from '../src/definition.ts';
+import { venvSitePackagesDir } from '../src/python-home.ts';
 import { PythonEnvWorld } from '../src/world.ts';
 import { FakeHost } from './helpers/fake-host.ts';
 import { FakeRunner } from './helpers/fake-runner.ts';
@@ -67,10 +68,11 @@ describe('Python Env World', () => {
   it('挂载成功推送 pythonenv.ready 并注入 hooks', async () => {
     const { world, host } = await startedWorld();
     expect(host.events.map((e) => e.type)).toEqual(['pythonenv.ready']);
-    const site = join(scratchDir, 'venv', 'Lib', 'site-packages');
-    expect(existsSync(join(site, 'pythonenv_hooks.py'))).toBe(true);
-    expect(existsSync(join(site, 'pythonenv_hooks.pth'))).toBe(true);
-    expect(existsSync(join(site, 'sitecustomize.py'))).toBe(true);
+    const site = venvSitePackagesDir(join(scratchDir, 'venv'));
+    expect(site).toBeTruthy();
+    expect(existsSync(join(site!, 'pythonenv_hooks.py'))).toBe(true);
+    expect(existsSync(join(site!, 'pythonenv_hooks.pth'))).toBe(true);
+    expect(existsSync(join(site!, 'sitecustomize.py'))).toBe(true);
     await world.stop();
   });
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   BWRAP_DNS_ROOTS,
@@ -101,26 +101,28 @@ describe('bwrap argv', () => {
   });
 
   it('remounts /tmp when workDir is outside /tmp', () => {
-    const outside = mkdtempSync(join(tmpdir(), 'pe-bwrap-out-'));
-    // 在 Windows 单测里 outside 仍可能在 Temp 下；用显式假路径测组装逻辑
-    rmSync(outside, { recursive: true, force: true });
-    const fakeWork = '/home/user/pythonenv-work';
-    mkdirSync(join(tmpdir(), 'pe-bwrap-placeholder'), { recursive: true });
-    const argv = buildBwrapArgv({
-      workDirAbs: fakeWork,
-      cwd: fakeWork,
-      command: 'true',
-      systemRoots: [],
-      tmpHostDir: '/home/user/pythonenv-work/venv-state/tmp',
-    });
-    let saw = false;
-    for (let i = 0; i < argv.length - 2; i++) {
-      if (argv[i] === '--bind' && argv[i + 2] === '/tmp') {
-        expect(argv[i + 1]).toBe('/home/user/pythonenv-work/venv-state/tmp');
-        saw = true;
+    // os.tmpdir() 常为 /tmp；在 home 下建真实目录，覆盖「workDir 不在 /tmp」分支（也会写 gai.conf）
+    const outside = mkdtempSync(join(homedir(), 'pe-bwrap-out-'));
+    try {
+      mkdirSync(join(outside, 'venv-state', 'tmp'), { recursive: true });
+      const tmpHost = join(outside, 'venv-state', 'tmp');
+      const argv = buildBwrapArgv({
+        workDirAbs: outside,
+        cwd: outside,
+        command: 'true',
+        systemRoots: [],
+      });
+      let saw = false;
+      for (let i = 0; i < argv.length - 2; i++) {
+        if (argv[i] === '--bind' && argv[i + 2] === '/tmp') {
+          expect(argv[i + 1]).toBe(tmpHost);
+          saw = true;
+        }
       }
+      expect(saw).toBe(true);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
     }
-    expect(saw).toBe(true);
   });
 });
 
